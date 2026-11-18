@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, type RefObject } from 'react'
-import type { CaptureItem, Mode, Settings } from '../types'
+import type { Accessory, CaptureItem, Mode, Settings } from '../types'
 import { usePhotoboothStore } from '../store/photoboothStore'
-import { grabFrame } from './useCamera'
+import { drawVideoCover, grabFrame } from './useCamera'
 import { buildComposite, createDemoFrame, settingsToComposite } from '../utils/composite'
 import { playCountdownTick, playShutter, playSuccess } from '../utils/audio'
 import { buildBoomerang } from '../utils/boomerang'
@@ -17,10 +17,11 @@ type Args = {
   videoRef: RefObject<HTMLVideoElement>
   cameraReady: boolean
   settings: Settings
+  accessories?: Accessory[]
   onFlash: () => void
 }
 
-export function useCapture({ videoRef, cameraReady, settings, onFlash }: Args) {
+export function useCapture({ videoRef, cameraReady, settings, accessories, onFlash }: Args) {
   const addCapture = usePhotoboothStore((s) => s.addCapture)
   const setSession = usePhotoboothStore((s) => s.setSession)
 
@@ -32,6 +33,7 @@ export function useCapture({ videoRef, cameraReady, settings, onFlash }: Args) {
   const cancelled = useRef(false)
   const recorderRef = useRef<MediaRecorder | null>(null)
 
+  const activeAccessories = accessories ?? settings.accessories
   const sound = settings.sound
   const tick = useCallback((final = false) => { if (sound) playCountdownTick(final) }, [sound])
   const shutter = useCallback(() => { if (sound) playShutter() }, [sound])
@@ -66,8 +68,8 @@ export function useCapture({ videoRef, cameraReady, settings, onFlash }: Args) {
           mirror: settings.mirror,
         }) ?? createDemoFrame(index, settings.filter)
       : createDemoFrame(index, settings.filter)
-    return applyAccessories(raw, accessoriesForShot(index, settings))
-  }, [cameraReady, videoRef, settings])
+    return applyAccessories(raw, accessoriesForShot(index, settings, activeAccessories))
+  }, [cameraReady, videoRef, settings, activeAccessories])
 
   const persist = useCallback(async (mode: Mode, shots: string[], composite: string | null, duration?: number) => {
     const fullImage = composite ?? shots[0] ?? ''
@@ -161,7 +163,7 @@ export function useCapture({ videoRef, cameraReady, settings, onFlash }: Args) {
       ctx.filter = `${preset}brightness(${settings.brightness}%) contrast(${settings.contrast}%) saturate(${settings.saturation}%)`
       const video = videoRef.current
       if (cameraReady && video?.videoWidth) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+        drawVideoCover(ctx, video, canvas.width, canvas.height)
       } else {
         const g = ctx.createLinearGradient(0, 0, 640, 480)
         g.addColorStop(0, `hsl(${200 + ratio * 120}, 70%, 45%)`)
@@ -200,15 +202,15 @@ export function useCapture({ videoRef, cameraReady, settings, onFlash }: Args) {
     let url = URL.createObjectURL(new Blob(chunks, { type: recorder.mimeType || 'video/webm' }))
     let poster = canvas.toDataURL('image/jpeg', 0.9)
 
-    if (settings.accessories.length) {
-      poster = await applyAccessories(poster, settings.accessories)
+    if (activeAccessories.length) {
+      poster = await applyAccessories(poster, activeAccessories)
     }
 
     if (mode === 'boomerang') {
       setPhase('finishing')
       try {
         const decorated = await Promise.all(
-          collectedFrames.map((f, i) => applyAccessories(f, accessoriesForShot(i, settings))),
+          collectedFrames.map((f, i) => applyAccessories(f, accessoriesForShot(i, settings, activeAccessories))),
         )
         const result = await buildBoomerang(decorated)
         url = result.url
@@ -222,7 +224,7 @@ export function useCapture({ videoRef, cameraReady, settings, onFlash }: Args) {
     persist(mode, [poster], poster, duration)
     setRecordedSeconds(0)
     setPhase('idle')
-  }, [settings, runCountdown, cameraReady, videoRef, setSession, persist])
+  }, [settings, runCountdown, cameraReady, videoRef, setSession, persist, activeAccessories])
 
   const startMode = useCallback(async (activeMode: Mode) => {
     if (phase !== 'idle') return

@@ -99,16 +99,47 @@ export function useCamera() {
   }
 }
 
-/** Draws the current video frame to a canvas with mirror + CSS filter applied. */
+/** Source rectangle that reproduces CSS `object-fit: cover` for a given display box. */
+export function coverSourceRect(video: HTMLVideoElement, boxW: number, boxH: number) {
+  const vw = video.videoWidth
+  const vh = video.videoHeight
+  const boxAspect = boxW / boxH
+  const videoAspect = vw / vh
+  if (videoAspect > boxAspect) {
+    const sw = vh * boxAspect
+    return { sx: (vw - sw) / 2, sy: 0, sw, sh: vh }
+  }
+  const sh = vw / boxAspect
+  return { sx: 0, sy: (vh - sh) / 2, sw: vw, sh }
+}
+
+/** Draws only the visible (cover-cropped) part of the video onto a canvas. */
+export function drawVideoCover(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  w: number,
+  h: number,
+) {
+  const boxW = video.clientWidth || video.videoWidth
+  const boxH = video.clientHeight || video.videoHeight
+  const { sx, sy, sw, sh } = coverSourceRect(video, boxW, boxH)
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h)
+}
+
+/** Draws the current video frame to a canvas with mirror + CSS filter applied.
+ *  The captured frame matches exactly what the user sees in the viewfinder. */
 export function grabFrame(
   video: HTMLVideoElement,
   opts: { filter: string; brightness: number; contrast: number; saturation: number; mirror: boolean; maxWidth?: number },
 ): string | null {
   if (!video.videoWidth || !video.videoHeight) return null
+  const boxW = video.clientWidth || video.videoWidth
+  const boxH = video.clientHeight || video.videoHeight
+  const { sw, sh } = coverSourceRect(video, boxW, boxH)
   const maxWidth = opts.maxWidth ?? 1600
-  const scale = Math.min(1, maxWidth / video.videoWidth)
-  const w = Math.round(video.videoWidth * scale)
-  const h = Math.round(video.videoHeight * scale)
+  const scale = Math.min(1, maxWidth / sw)
+  const w = Math.max(1, Math.round(sw * scale))
+  const h = Math.max(1, Math.round(sh * scale))
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
@@ -120,9 +151,9 @@ export function grabFrame(
     ctx.translate(w, 0)
     ctx.scale(-1, 1)
   }
-  const preset = opts.filter === 'none' ? 'none' : opts.filter
-  ctx.filter = `${preset === 'none' ? '' : preset + ' '}brightness(${opts.brightness}%) contrast(${opts.contrast}%) saturate(${opts.saturation}%)`
-  ctx.drawImage(video, 0, 0, w, h)
+  const preset = opts.filter === 'none' ? '' : opts.filter
+  ctx.filter = `${preset} brightness(${opts.brightness}%) contrast(${opts.contrast}%) saturate(${opts.saturation}%)`.trim()
+  drawVideoCover(ctx, video, w, h)
   ctx.restore()
-  return canvas.toDataURL('image/jpeg', 0.92)
+  return canvas.toDataURL('image/jpeg', 0.94)
 }

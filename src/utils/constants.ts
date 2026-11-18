@@ -89,6 +89,7 @@ export const DEFAULT_SETTINGS: Settings = {
   stickers: [],
   accessories: [],
   effectMode: 'rotate',
+  faceAutoPlace: true,
   cameraDeviceId: '',
 }
 

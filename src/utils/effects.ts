@@ -1,4 +1,4 @@
-import type { Accessory, Settings } from '../types'
+import type { Accessory, AccessoryAnchor, FaceBox, Settings } from '../types'
 
 export type EffectCategory = 'Hats' | 'Ears & horns' | 'Face' | 'Fun'
 export type EffectDef = {
@@ -11,6 +11,7 @@ export type EffectDef = {
   y: number
   size: number
   rotation?: number
+  anchor?: AccessoryAnchor
 }
 
 const svg = (body: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${body}</svg>`)}`
@@ -109,23 +110,29 @@ const FACE: EffectDef[] = [
 ]
 
 const FUN_EMOJIS: EffectDef[] = [
-  { id: 'e-glasses', name: 'Cool glasses', category: 'Fun', kind: 'emoji', source: '🕶️', x: 0.5, y: 0.43, size: 0.32 },
-  { id: 'e-crown', name: 'Crown', category: 'Fun', kind: 'emoji', source: '👑', x: 0.5, y: 0.14, size: 0.28 },
+  { id: 'e-glasses', name: 'Cool glasses', category: 'Fun', kind: 'emoji', source: '🕶️', x: 0.5, y: 0.43, size: 0.32, anchor: 'face' },
+  { id: 'e-crown', name: 'Crown', category: 'Fun', kind: 'emoji', source: '👑', x: 0.5, y: 0.14, size: 0.28, anchor: 'head' },
   { id: 'e-cat', name: 'Cat', category: 'Fun', kind: 'emoji', source: '🐱', x: 0.78, y: 0.3, size: 0.24 },
   { id: 'e-unicorn', name: 'Unicorn', category: 'Fun', kind: 'emoji', source: '🦄', x: 0.78, y: 0.26, size: 0.26 },
   { id: 'e-party', name: 'Party', category: 'Fun', kind: 'emoji', source: '🎉', x: 0.8, y: 0.24, size: 0.24, rotation: -18 },
   { id: 'e-heart', name: 'Heart', category: 'Fun', kind: 'emoji', source: '💖', x: 0.24, y: 0.3, size: 0.22 },
   { id: 'e-star', name: 'Star', category: 'Fun', kind: 'emoji', source: '⭐', x: 0.74, y: 0.24, size: 0.22 },
   { id: 'e-fire', name: 'Fire', category: 'Fun', kind: 'emoji', source: '🔥', x: 0.25, y: 0.28, size: 0.22, rotation: -12 },
-  { id: 'e-bow', name: 'Bow', category: 'Fun', kind: 'emoji', source: '🎀', x: 0.72, y: 0.2, size: 0.24 },
-  { id: 'e-disco', name: 'Disco', category: 'Fun', kind: 'emoji', source: '🪩', x: 0.5, y: 0.12, size: 0.26 },
-  { id: 'e-trophy', name: 'Winner', category: 'Fun', kind: 'emoji', source: '🏆', x: 0.5, y: 0.15, size: 0.26 },
-  { id: 'e-alien', name: 'Alien', category: 'Fun', kind: 'emoji', source: '👽', x: 0.78, y: 0.28, size: 0.24 },
+  { id: 'e-bow', name: 'Bow', category: 'Fun', kind: 'emoji', source: '🎀', x: 0.72, y: 0.2, size: 0.24, anchor: 'head' },
+  { id: 'e-disco', name: 'Disco', category: 'Fun', kind: 'emoji', source: '🪩', x: 0.5, y: 0.12, size: 0.26, anchor: 'head' },
+  { id: 'e-trophy', name: 'Winner', category: 'Fun', kind: 'emoji', source: '🏆', x: 0.5, y: 0.15, size: 0.26, anchor: 'head' },
+  { id: 'e-alien', name: 'Alien', category: 'Fun', kind: 'emoji', source: '👽', x: 0.78, y: 0.28, size: 0.24, anchor: 'face' },
 ]
 
 export const EFFECTS: EffectDef[] = [...HATS, ...EARS, ...FACE, ...FUN_EMOJIS]
 
 export const EFFECT_CATEGORIES: EffectCategory[] = ['Hats', 'Ears & horns', 'Face', 'Fun']
+
+function categoryAnchor(category: EffectCategory): AccessoryAnchor {
+  if (category === 'Hats' || category === 'Ears & horns') return 'head'
+  if (category === 'Face') return 'face'
+  return 'free'
+}
 
 export function makeAccessory(def: EffectDef): Accessory {
   return {
@@ -137,7 +144,28 @@ export function makeAccessory(def: EffectDef): Accessory {
     y: def.y,
     size: def.size,
     rotation: def.rotation ?? 0,
+    anchor: def.anchor ?? categoryAnchor(def.category),
   }
+}
+
+/** Repositions face/head accessories using a detected face box, normalized to the frame. */
+export function resolveAccessories(accessories: Accessory[], faceBox: FaceBox | null): Accessory[] {
+  if (!faceBox) return accessories
+  return accessories.map((acc) => {
+    if (acc.anchor === 'free') return acc
+    if (acc.anchor === 'head') {
+      return {
+        ...acc,
+        x: Math.min(1, Math.max(0, faceBox.x + faceBox.w / 2)),
+        y: Math.min(1, Math.max(0, faceBox.y + faceBox.w * 0.04)),
+      }
+    }
+    return {
+      ...acc,
+      x: Math.min(1, Math.max(0, faceBox.x + faceBox.w / 2)),
+      y: Math.min(1, Math.max(0, faceBox.y + faceBox.h * 0.46)),
+    }
+  })
 }
 
 const imageCache = new Map<string, Promise<HTMLImageElement>>()
@@ -200,8 +228,8 @@ export async function applyAccessories(dataUrl: string, accessories: Accessory[]
 }
 
 /** Chooses which accessories apply to a given shot index. */
-export function accessoriesForShot(index: number, settings: Settings): Accessory[] {
-  const list = settings.accessories
+export function accessoriesForShot(index: number, settings: Settings, override?: Accessory[]): Accessory[] {
+  const list = override ?? settings.accessories
   if (!list.length) return []
   if (settings.effectMode === 'all') return list
   if (settings.effectMode === 'rotate') return [list[index % list.length]]

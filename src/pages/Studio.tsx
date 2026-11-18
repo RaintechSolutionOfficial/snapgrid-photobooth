@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowLeft, Camera, Grid3X3, Video, Repeat2, Timer, Settings2, Images, Download,
@@ -9,6 +9,8 @@ import type { Mode } from '../types'
 import { MODES, FRAMES, TEMPLATES, BACKGROUND_THEMES } from '../utils/constants'
 import { useTheme } from '../hooks/useTheme'
 import { useCamera } from '../hooks/useCamera'
+import { useFaceBox } from '../hooks/useFaceBox'
+import { resolveAccessories } from '../utils/effects'
 import { useCapture, type CapturePhase } from '../hooks/useCapture'
 import { usePhotoboothStore } from '../store/photoboothStore'
 import { CameraView } from '../components/camera/CameraView'
@@ -18,6 +20,7 @@ import { OverlayControls } from '../components/overlays/OverlayControls'
 import { EffectsPanel } from '../components/overlays/EffectsPanel'
 import { Slider } from '../components/studio/Slider'
 import { Gallery } from '../components/gallery/Gallery'
+import { ResultModal } from '../components/studio/ResultModal'
 import { downloadDataUrl, stamp, printImage } from '../utils/download'
 import { downloadZip } from '../utils/zip'
 import { generateQr, shareUrl } from '../utils/qr'
@@ -44,8 +47,16 @@ export function Studio() {
   const [toast, setToast] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [accessoryFocus, setAccessoryFocus] = useState<string | null>(null)
+  const [resultOpen, setResultOpen] = useState(false)
 
   const cam = useCamera()
+  const faceTrackingOn = settings.faceAutoPlace && settings.accessories.length > 0 && cam.state === 'ready'
+  const { faceBox } = useFaceBox(cam.videoRef, faceTrackingOn, settings.mirror && cam.facingMode === 'user')
+  const resolvedAccessories = useMemo(
+    () => resolveAccessories(settings.accessories, settings.faceAutoPlace ? faceBox : null),
+    [settings.accessories, settings.faceAutoPlace, faceBox],
+  )
+  const faceTracked = Boolean(faceBox && settings.faceAutoPlace)
 
   const triggerFlash = useCallback(() => {
     setFlash(true)
@@ -56,6 +67,7 @@ export function Studio() {
     videoRef: cam.videoRef,
     cameraReady: cam.state === 'ready',
     settings,
+    accessories: resolvedAccessories,
     onFlash: () => { if (settings.flash) triggerFlash() },
   })
 
@@ -65,6 +77,13 @@ export function Studio() {
   }
 
   const isBusy = capture.phase !== 'idle'
+  const prevPhase = useRef<CapturePhase>(capture.phase)
+
+  // Show the finished capture automatically when a capture sequence completes.
+  useEffect(() => {
+    if (prevPhase.current !== 'idle' && capture.phase === 'idle' && session.composite) setResultOpen(true)
+    prevPhase.current = capture.phase
+  }, [capture.phase, session.composite])
 
   // Auto-select 1×1 when switching to single-shot modes; restore 2×2 for grid.
   const switchMode = (next: Mode) => {
@@ -148,17 +167,17 @@ export function Studio() {
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
       {/* Top bar */}
       <header className="sticky top-0 z-30 glass border-b border-[var(--line)]">
-        <div className="max-w-[1600px] mx-auto px-4 h-14 flex items-center gap-3">
+        <div className="max-w-[1600px] mx-auto px-2 sm:px-4 h-14 flex items-center gap-2 sm:gap-3">
           <Link to="/" className="btn btn-icon btn-ghost" aria-label="Back to home"><ArrowLeft size={17} /></Link>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-[var(--grad)] flex items-center justify-center text-white shadow-[0_4px_12px_rgba(10,108,255,.3)]"><Camera size={16} /></div>
-            <span className="wordmark text-lg">snapgrid<span className="text-[var(--accent)]">.</span></span>
-            <span className="hidden sm:inline mono text-[10px] text-[var(--muted)] px-2 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--line)]">STUDIO</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-[var(--grad)] flex items-center justify-center text-white shadow-[0_4px_12px_rgba(10,108,255,.3)] flex-none"><Camera size={16} /></div>
+            <span className="wordmark text-base sm:text-lg hidden sm:inline">snapgrid<span className="text-[var(--accent)]">.</span></span>
+            <span className="hidden lg:inline mono text-[10px] text-[var(--muted)] px-2 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--line)]">STUDIO</span>
           </div>
           <div className="flex-1" />
-          <button className="btn btn-sm btn-ghost hidden sm:inline-flex" onClick={() => setShortcutsOpen(true)}><Keyboard size={14} /> Shortcuts</button>
+          <button className="btn btn-sm btn-ghost hidden lg:inline-flex" onClick={() => setShortcutsOpen(true)}><Keyboard size={14} /> Shortcuts</button>
           <button className="btn btn-icon btn-ghost" onClick={toggleTheme} aria-label="Toggle theme">{theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}</button>
-          <button className="btn btn-sm btn-primary" onClick={() => setGalleryOpen(true)}><Images size={15} /> Gallery <span className="mono opacity-80">{captures.length}</span></button>
+          <button className="btn btn-sm btn-primary !px-2.5 sm:!px-4" onClick={() => setGalleryOpen(true)}><Images size={15} /> <span className="hidden sm:inline">Gallery</span> <span className="mono opacity-80">{captures.length}</span></button>
         </div>
       </header>
 
@@ -171,9 +190,9 @@ export function Studio() {
         </div>
       )}
 
-      <div className="max-w-[1600px] mx-auto px-3 sm:px-4 py-4 grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)_300px] gap-4 items-start">
+      <div className="max-w-[1600px] mx-auto px-3 sm:px-4 py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[240px_minmax(0,1fr)_300px] gap-3 sm:gap-4 items-start">
         {/* LEFT RAIL */}
-        <aside className="space-y-4 order-2 lg:order-1">
+        <aside className="space-y-4 order-2 md:order-3 xl:order-1 min-w-0">
           <section className="card p-4">
             <span className="label">Capture mode</span>
             <div className="grid grid-cols-2 gap-2">
@@ -225,13 +244,16 @@ export function Studio() {
         </aside>
 
         {/* CENTER: CAMERA */}
-        <main className="order-1 lg:order-2 space-y-4">
-          <div className="relative aspect-[4/3] sm:aspect-[16/10] w-full">
+        <main className="order-1 md:order-1 xl:order-2 min-w-0 space-y-4">
+          <div className="relative aspect-[4/3] w-full">
             <CameraView
               videoRef={cam.videoRef}
               cameraState={cam.state}
               error={cam.error}
               settings={settings}
+              accessories={resolvedAccessories}
+              focusedId={accessoryFocus}
+              faceTracked={faceTracked}
               facingMode={cam.facingMode}
               onSwitchCamera={cam.switchFacing}
               onRetry={() => void cam.start()}
@@ -326,7 +348,7 @@ export function Studio() {
         </main>
 
         {/* RIGHT RAIL — settings */}
-        <aside className="order-3 space-y-4">
+        <aside className="order-3 md:order-2 xl:order-3 space-y-4 min-w-0">
           <div className="card overflow-hidden">
             <div className="grid grid-cols-4 border-b border-[var(--line)]">
               {([
@@ -439,6 +461,16 @@ export function Studio() {
 
       {/* Gallery */}
       <Gallery open={galleryOpen} onClose={() => setGalleryOpen(false)} />
+
+      <ResultModal
+        open={resultOpen && !galleryOpen}
+        onClose={() => setResultOpen(false)}
+        session={session}
+        settings={settings}
+        latest={captures[0]}
+        onRetake={handleRetake}
+        onToast={showToast}
+      />
 
       {/* Shortcuts modal */}
       {shortcutsOpen && (

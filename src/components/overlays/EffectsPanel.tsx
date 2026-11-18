@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Sparkles, X, RotateCcw, Shuffle, Layers3 } from 'lucide-react'
+import { Sparkles, X, RotateCcw, Shuffle, Layers3, ScanFace } from 'lucide-react'
 import type { Settings } from '../../types'
 import { EFFECTS, EFFECT_CATEGORIES, makeAccessory, type EffectCategory } from '../../utils/effects'
 import { EFFECT_MODES } from '../../utils/constants'
@@ -37,6 +37,16 @@ export function EffectsPanel({ settings, update, selectedId, onSelect }: Props) 
     <div className="space-y-4">
       <div>
         <span className="label flex items-center gap-1.5"><Sparkles size={12} /> Try-on effects</span>
+        <label className="flex items-center justify-between gap-2 p-2.5 mb-3 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] cursor-pointer">
+          <span className="flex items-center gap-2">
+            <ScanFace size={14} className="text-[var(--accent)]" />
+            <span>
+              <span className="block text-[12px] font-semibold text-[var(--ink)]">Follow my face</span>
+              <span className="block text-[10px] text-[var(--muted)]">Auto-place hats & face effects</span>
+            </span>
+          </span>
+          <button className="switch" data-on={settings.faceAutoPlace} onClick={() => update({ faceAutoPlace: !settings.faceAutoPlace })} aria-label="Toggle face tracking" />
+        </label>
         <div className="flex flex-wrap gap-1.5 mb-3">
           {EFFECT_CATEGORIES.map((c) => (
             <button key={c} className="chip" data-active={category === c} onClick={() => setCategory(c)}>{c}</button>

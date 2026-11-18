@@ -21,6 +21,8 @@ export type Sticker = {
 }
 
 /** An emoji or drawn effect placed on a shot. Coordinates/size are normalized (0-1 of frame width). */
+export type AccessoryAnchor = 'head' | 'face' | 'free'
+
 export type Accessory = {
   id: string
   name: string
@@ -30,7 +32,10 @@ export type Accessory = {
   y: number
   size: number
   rotation: number
+  anchor: AccessoryAnchor
 }
+
+export type FaceBox = { x: number; y: number; w: number; h: number }
 
 export type Settings = {
   theme: 'light' | 'dark'
@@ -55,6 +60,7 @@ export type Settings = {
   stickers: Sticker[]
   accessories: Accessory[]
   effectMode: EffectMode
+  faceAutoPlace: boolean
   cameraDeviceId: string
 }
 
