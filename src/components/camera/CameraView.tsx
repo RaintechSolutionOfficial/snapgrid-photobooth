@@ -2,8 +2,9 @@ import { useEffect, useRef, useState, type RefObject, type PointerEvent as React
 import { Camera, CameraOff, RotateCcw, Maximize, Minimize, SwitchCamera, Sparkles, Loader2, Check, ScanFace, Images } from 'lucide-react'
 import type { Accessory, Settings } from '../../types'
 import type { CameraState } from '../../hooks/useCamera'
-import { FILTER_MAP } from '../../utils/constants'
+import { drawDemoFrame, renderFrame } from '../../utils/videoEffects'
 import { CountdownRing } from './CountdownRing'
+import { FrameOverlay } from './FrameOverlay'
 import type { CapturePhase } from '../../hooks/useCapture'
 
 type Props = {
@@ -52,9 +53,25 @@ export function CameraView({
   onAccessorySelect,
 }: Props) {
   const [fullscreen, setFullscreen] = useState(false)
-  const [demoTick, setDemoTick] = useState(0)
-  const stageRef = useRef<HTMLDivElement | null>(null)
+  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const dragRef = useRef<string | null>(null)
+  const renderOpts = useRef({
+    effectId: settings.effectId,
+    filter: settings.filter,
+    brightness: settings.brightness,
+    contrast: settings.contrast,
+    saturation: settings.saturation,
+    mirror: settings.mirror && facingMode === 'user',
+  })
+  renderOpts.current = {
+    effectId: settings.effectId,
+    filter: settings.filter,
+    brightness: settings.brightness,
+    contrast: settings.contrast,
+    saturation: settings.saturation,
+    mirror: settings.mirror && facingMode === 'user',
+  }
 
   const handlePointerDown = (e: ReactPointerEvent<HTMLDivElement>, id: string) => {
     if (faceTracked) return
@@ -64,18 +81,13 @@ export function CameraView({
     onAccessorySelect(id)
   }
   const handlePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current || !stageRef.current || faceTracked) return
-    const rect = stageRef.current.getBoundingClientRect()
+    if (!dragRef.current || !viewportRef.current || faceTracked) return
+    const rect = viewportRef.current.getBoundingClientRect()
     const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
     const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height))
     onAccessoryMove(dragRef.current, x, y)
   }
   const handlePointerUp = () => { dragRef.current = null }
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setDemoTick((n) => n + 1), 1200)
-    return () => window.clearInterval(timer)
-  }, [])
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -87,117 +99,179 @@ export function CameraView({
     }
   }
 
-  const filterCss = `${settings.filter === 'none' ? '' : (FILTER_MAP[settings.filter] ?? '') + ' '}brightness(${settings.brightness}%) contrast(${settings.contrast}%) saturate(${settings.saturation}%)`
+  // One render loop drives the live viewfinder. Capture reuses the same renderer.
+  useEffect(() => {
+    let raf = 0
+    const loop = (time: number) => {
+      const canvas = canvasRef.current
+      const ctx = canvas?.getContext('2d')
+      if (ctx && canvas) {
+        const o = renderOpts.current
+        if (cameraState === 'ready' && videoRef.current?.videoWidth) {
+          renderFrame(ctx, videoRef.current, { ...o, accessories: [], time }, canvas.width, canvas.height)
+        } else {
+          drawDemoFrame(ctx, canvas.width, canvas.height, time)
+        }
+      }
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf)
+  }, [cameraState, videoRef])
+
   const ready = cameraState === 'ready'
   const recording = phase === 'recording'
   const gridMode = activeMode === 'grid' && settings.rows > 1
-  const gridCount = settings.rows * settings.cols
+
+  // In grid mode the live preview is confined to a single cell (1 out of N),
+  // the one that will be captured next. Otherwise it fills the whole stage.
+  const rows = gridMode ? settings.rows : 1
+  const cols = gridMode ? settings.cols : 1
+  const gridCount = rows * cols
   const captured = Math.min(gridShots.length, gridCount)
-  const demo = !ready
+  // Follow the shot being taken; at rest the preview sits in the first cell.
+  const activeCell = phase === 'idle' ? 0 : Math.min(currentIndex, gridCount - 1)
+  const activeRow = Math.floor(activeCell / cols)
+  const activeCol = activeCell % cols
+  const frameCaption = settings.eventTitle || settings.caption || 'snapgrid'
 
   return (
-    <div ref={stageRef} className="camera-stage relative w-full h-full min-h-[320px] rounded-[24px] border border-[var(--line-2)] shadow-[var(--shadow-card)] overflow-hidden [container-type:inline-size]">
-      {/* Live video — fills the stage exactly like the captured frame */}
-      <video
-        ref={videoRef}
-        playsInline
-        muted
-        autoPlay
-        className="camera-video absolute inset-0"
+    <div className="camera-stage relative w-full h-full min-h-[320px] rounded-[24px] border border-[var(--line-2)] shadow-[var(--shadow-card)] overflow-hidden [container-type:inline-size]">
+      {/* Shared grid: the live preview occupies one cell, the guide boxes sit on top. */}
+      <div
+        className="absolute"
         style={{
-          filter: filterCss,
-          transform: settings.mirror && facingMode === 'user' ? 'scaleX(-1)' : undefined,
-          opacity: ready ? 1 : 0,
+          inset: gridMode ? '3.5%' : 0,
+          display: 'grid',
+          gridTemplateRows: `repeat(${rows}, 1fr)`,
+          gridTemplateColumns: `repeat(${cols}, 1fr)`,
+          gap: gridMode ? 5 : 0,
         }}
-      />
+      >
+        {/* Live camera + effects, wrapped in the selected paper frame */}
+        <div
+          className={`relative ${gridMode ? 'rounded-lg' : ''}`}
+          style={{ gridRow: activeRow + 1, gridColumn: activeCol + 1 }}
+        >
+          <FrameOverlay frame={settings.frame} caption={frameCaption} interactive windowRef={viewportRef}>
+            <div className="absolute inset-0 [container-type:inline-size] bg-[#0a0d14]">
+              {/* Hidden source — the visible canvas is the single rendered pipeline */}
+              <video ref={videoRef} playsInline muted autoPlay className="absolute inset-0 w-full h-full opacity-0 pointer-events-none" />
+              <canvas ref={canvasRef} width={1280} height={960} className="camera-video absolute inset-0" />
 
-      {/* Soft vignette + top gradient so controls stay readable */}
-      <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(180deg, rgba(0,0,0,.42) 0%, transparent 22%, transparent 72%, rgba(0,0,0,.55) 100%)' }} />
+              {/* Soft vignette + top gradient so controls stay readable */}
+              <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(180deg, rgba(0,0,0,.42) 0%, transparent 22%, transparent 72%, rgba(0,0,0,.55) 100%)' }} />
 
-      {/* Demo placeholder */}
-      {demo && cameraState !== 'loading' && (
-        <div className="absolute inset-0 flex items-center justify-center dot-grid">
-          <div className="absolute inset-0" style={{ background: 'radial-gradient(circle at 50% 45%, rgba(61,139,255,.25), transparent 65%)' }} />
-          <div className="relative text-center px-6">
-            <div className="mx-auto w-16 h-16 rounded-2xl glass flex items-center justify-center mb-4">
-              <CameraOff size={26} className="text-white/70" />
-            </div>
-            <h3 className="text-white font-semibold text-lg mb-1">
-              {cameraState === 'denied' ? 'Camera access needed' : cameraState === 'unsupported' ? 'Camera not supported' : 'Demo mode'}
-            </h3>
-            <p className="text-white/60 text-sm max-w-xs mx-auto mb-4 leading-relaxed">
-              {error || 'Allow camera access for live photos — or explore every feature using generated demo frames.'}
-            </p>
-            <button className="btn btn-sm btn-primary mx-auto" onClick={onRetry}>
-              <RotateCcw size={14} /> Try again
-            </button>
-            <p className="mono text-[10px] text-white/35 mt-3 tracking-widest">DEMO FRAME #{demoTick}</p>
-          </div>
-        </div>
-      )}
+              {/* Live system only — no generated demo frames when the camera is unavailable */}
+              {!ready && cameraState !== 'loading' && (
+                gridMode ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-center text-white/70" title={error}>
+                    <CameraOff size={18} />
+                    <span className="mono text-[9px] tracking-widest">CAMERA OFF</span>
+                    <button className="btn btn-sm btn-primary !py-1 !px-2" onClick={onRetry}><RotateCcw size={11} /> Retry</button>
+                  </div>
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center dot-grid">
+                    <div className="relative text-center px-6">
+                      <div className="mx-auto w-16 h-16 rounded-2xl glass flex items-center justify-center mb-4">
+                        <CameraOff size={26} className="text-white/70" />
+                      </div>
+                      <h3 className="text-white font-semibold text-lg mb-1">
+                        {cameraState === 'denied' ? 'Camera access needed' : cameraState === 'unsupported' ? 'Camera not supported' : 'Camera unavailable'}
+                      </h3>
+                      <p className="text-white/60 text-sm max-w-xs mx-auto mb-4 leading-relaxed">
+                        {error || 'Enable camera access to use the live booth.'}
+                      </p>
+                      <button className="btn btn-sm btn-primary mx-auto" onClick={onRetry}>
+                        <RotateCcw size={14} /> Try again
+                      </button>
+                    </div>
+                  </div>
+                )
+              )}
 
-      {cameraState === 'loading' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#0a0d14]/75">
-          <div className="text-center text-white/80">
-            <Loader2 size={30} className="animate-spin mx-auto mb-3 text-[var(--accent-2)]" />
-            <p className="text-sm">Starting camera…</p>
-          </div>
-        </div>
-      )}
+              {cameraState === 'loading' && (
+                <div className="absolute inset-0 flex items-center justify-center bg-[#0a0d14]/75">
+                  <Loader2 size={gridMode ? 20 : 30} className="animate-spin text-[var(--accent-2)]" />
+                </div>
+              )}
 
-      <div className="scanline absolute inset-0 pointer-events-none opacity-40" />
-
-      {/* Per-shot grid guide — shows captured shots and highlights the next one */}
-      {gridMode && ready && (
-        <>
-          <div
-            className="absolute pointer-events-none z-[6]"
-            style={{
-              inset: '3.5%',
-              display: 'grid',
-              gridTemplateRows: `repeat(${settings.rows}, 1fr)`,
-              gridTemplateColumns: `repeat(${settings.cols}, 1fr)`,
-              gap: 5,
-            }}
-          >
-            {Array.from({ length: gridCount }).map((_, i) => {
-              const shot = gridShots[i]
-              const isNext = i === captured && phase !== 'idle'
-              const isDone = Boolean(shot)
-              return (
+              {/* Effect layer — same positions are baked into the captured frame */}
+              {accessories.map((acc) => (
                 <div
-                  key={i}
-                  className={`relative rounded-lg overflow-hidden transition-all duration-300 ${isDone ? 'border-2 border-emerald-400/80 shadow-[0_0_0_1px_rgba(0,0,0,.2)]' : isNext ? 'border-2 border-[var(--accent-2)] bg-white/5 shadow-[0_0_22px_rgba(79,163,255,.35)]' : 'border border-white/25 bg-black/10'}`}
+                  key={acc.id}
+                  className={`absolute z-10 ${faceTracked && acc.anchor !== 'free' ? 'pointer-events-none' : 'cursor-move'} select-none`}
+                  style={{
+                    left: `${acc.x * 100}%`,
+                    top: `${acc.y * 100}%`,
+                    width: `${acc.size * 100}%`,
+                    transform: `translate(-50%, -50%) rotate(${acc.rotation}deg)`,
+                    filter: focusedId === acc.id ? 'drop-shadow(0 0 6px rgba(79,163,255,.9))' : undefined,
+                  }}
+                  onPointerDown={(e) => handlePointerDown(e, acc.id)}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerCancel={handlePointerUp}
+                  title={faceTracked && acc.anchor !== 'free' ? `${acc.name} follows your face` : `Drag to reposition ${acc.name}`}
                 >
-                  {shot && <img src={shot} alt={`Shot ${i + 1}`} className="absolute inset-0 w-full h-full object-cover" />}
-                  {!shot && (
-                    <span className={`absolute top-1.5 left-2 mono text-[10px] font-semibold drop-shadow ${isNext ? 'text-white' : 'text-white/70'}`}>
-                      {String(i + 1).padStart(2, '0')}
+                  {acc.kind === 'emoji' ? (
+                    <span className="block w-full text-center leading-none" style={{ fontSize: `calc(${acc.size} * 100cqw)` }}>
+                      {acc.source}
                     </span>
-                  )}
-                  {isDone && (
-                    <span className="absolute top-1.5 left-1.5 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow">
-                      <Check size={12} className="text-white" strokeWidth={3} />
-                    </span>
-                  )}
-                  {isNext && (
-                    <span className="absolute inset-0 flex items-center justify-center">
-                      <span className="w-4 h-4 rounded-full bg-white/90 pulse-ring" />
-                    </span>
+                  ) : (
+                    <img src={acc.source} alt={acc.name} className="w-full h-auto drop-shadow-lg pointer-events-none" draggable={false} />
                   )}
                 </div>
-              )
-            })}
-          </div>
+              ))}
 
-          {/* Progress pill */}
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-[68px] z-[7] flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md text-white text-[11px] font-semibold shadow-lg">
-            <Images size={12} /> {captured} / {gridCount} shots
-            <span className="w-16 h-1 rounded-full bg-white/20 overflow-hidden">
-              <span className="block h-full bg-[var(--accent-2)] rounded-full transition-all duration-300" style={{ width: `${(captured / gridCount) * 100}%` }} />
-            </span>
-          </div>
-        </>
+              <div className="scanline absolute inset-0 pointer-events-none opacity-40" />
+            </div>
+          </FrameOverlay>
+        </div>
+
+        {/* Per-shot grid guide — shows captured shots and highlights the next one */}
+        {gridMode && ready && Array.from({ length: gridCount }).map((_, i) => {
+          const shot = gridShots[i]
+          const isNext = i === captured && phase !== 'idle'
+          const isDone = Boolean(shot)
+          return (
+            <div
+              key={i}
+              className={`relative rounded-lg overflow-hidden transition-all duration-300 pointer-events-none z-[6] ${isDone ? 'border-2 border-emerald-400/80 shadow-[0_0_0_1px_rgba(0,0,0,.2)]' : isNext ? 'border-2 border-[var(--accent-2)] bg-white/5 shadow-[0_0_22px_rgba(79,163,255,.35)]' : 'border border-white/25 bg-black/10'}`}
+              style={{ gridRow: Math.floor(i / cols) + 1, gridColumn: (i % cols) + 1 }}
+            >
+              {shot ? (
+                <FrameOverlay frame={settings.frame} caption={frameCaption}>
+                  <img src={shot} alt={`Shot ${i + 1}`} className="absolute inset-0 w-full h-full object-cover" />
+                </FrameOverlay>
+              ) : (
+                <span className={`absolute top-1.5 left-2 mono text-[10px] font-semibold drop-shadow ${isNext ? 'text-white' : 'text-white/70'}`}>
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+              )}
+              {isDone && (
+                <span className="absolute top-1.5 left-1.5 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow">
+                  <Check size={12} className="text-white" strokeWidth={3} />
+                </span>
+              )}
+              {isNext && (
+                <span className="absolute inset-0 flex items-center justify-center">
+                  <span className="w-4 h-4 rounded-full bg-white/90 pulse-ring" />
+                </span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Progress pill */}
+      {gridMode && ready && (
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-[68px] z-[7] flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md text-white text-[11px] font-semibold shadow-lg">
+          <Images size={12} /> {captured} / {gridCount} shots
+          <span className="w-16 h-1 rounded-full bg-white/20 overflow-hidden">
+            <span className="block h-full bg-[var(--accent-2)] rounded-full transition-all duration-300" style={{ width: `${(captured / gridCount) * 100}%` }} />
+          </span>
+        </div>
       )}
 
       {/* Face tracking indicator */}
@@ -206,34 +280,6 @@ export function CameraView({
           <ScanFace size={12} /> Face tracked
         </div>
       )}
-
-      {/* Effect layer — same positions are baked into the captured photo */}
-      {accessories.map((acc) => (
-        <div
-          key={acc.id}
-          className={`absolute z-10 ${faceTracked && acc.anchor !== 'free' ? 'pointer-events-none' : 'cursor-move'} select-none`}
-          style={{
-            left: `${acc.x * 100}%`,
-            top: `${acc.y * 100}%`,
-            width: `${acc.size * 100}%`,
-            transform: `translate(-50%, -50%) rotate(${acc.rotation}deg)`,
-            filter: focusedId === acc.id ? 'drop-shadow(0 0 6px rgba(79,163,255,.9))' : undefined,
-          }}
-          onPointerDown={(e) => handlePointerDown(e, acc.id)}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          title={faceTracked && acc.anchor !== 'free' ? `${acc.name} follows your face` : `Drag to reposition ${acc.name}`}
-        >
-          {acc.kind === 'emoji' ? (
-            <span className="block w-full text-center leading-none" style={{ fontSize: `calc(${acc.size} * 100cqw)` }}>
-              {acc.source}
-            </span>
-          ) : (
-            <img src={acc.source} alt={acc.name} className="w-full h-auto drop-shadow-lg pointer-events-none" draggable={false} />
-          )}
-        </div>
-      ))}
 
       {countdown !== null && <CountdownRing value={countdown} />}
 
@@ -270,10 +316,11 @@ export function CameraView({
       <div className="absolute bottom-0 inset-x-0 z-20 p-3 sm:p-4 flex items-end justify-between pointer-events-none gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold backdrop-blur ${ready ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-white/60'}`}>
-            <Camera size={12} /> {ready ? 'LIVE' : demo ? 'DEMO' : 'OFFLINE'}
+            <Camera size={12} /> {ready ? 'LIVE' : cameraState === 'loading' ? 'STARTING' : 'OFFLINE'}
           </span>
           <span className="mono text-[10px] text-white/60 px-2 py-1 rounded-full bg-black/40 backdrop-blur">
-            {settings.rows}×{settings.cols} · {settings.filter.toUpperCase()}
+            {settings.rows}×{settings.cols} · {settings.effectId.replace(/-/g, ' ').toUpperCase()}
+            {settings.frame !== 'none' && ` · ${settings.frame.toUpperCase()}`}
           </span>
           {accessories.length > 0 && (
             <span className="flex items-center gap-1.5 mono text-[10px] text-white/60 px-2 py-1 rounded-full bg-black/40 backdrop-blur">

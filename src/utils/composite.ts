@@ -1,5 +1,6 @@
 import type { FrameStyle, Settings, Sticker, TemplateId } from '../types'
 import { BACKGROUND_THEMES } from './constants'
+import { frameInsets } from './frame'
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -197,37 +198,82 @@ export async function buildComposite(shots: string[], opts: CompositeOptions): P
     const x = padding + cell.x
     const y = topBand + cell.y
     const { w, h } = cell
-    const inset = frame === 'polaroid' ? 8 : frame === 'classic' ? 5 : 0
-    const bottomInset = template === 'polaroid' || frame === 'polaroid' ? 30 : inset
+    const geo = frameInsets(frame)
+    const insetX = Math.round(w * geo.left)
+    const insetTop = Math.round(h * geo.top)
+    const insetBottom = Math.round(h * geo.bottom)
+    const winX = x + insetX
+    const winY = y + insetTop
+    const winW = Math.max(1, w - insetX * 2)
+    const winH = Math.max(1, h - insetTop - insetBottom)
 
     ctx.save()
-    if (cell.rotation) {
+    // Instant prints get a gentle deterministic tilt, like loose photos on a table.
+    const tilt = frame === 'polaroid' && template !== 'polaroid'
+      ? (i % 2 === 0 ? 1 : -1) * (1 + (i % 3) * 0.5)
+      : 0
+    const rotation = cell.rotation + tilt
+    if (rotation) {
       ctx.translate(x + w / 2, y + h / 2)
-      ctx.rotate((cell.rotation * Math.PI) / 180)
+      ctx.rotate((rotation * Math.PI) / 180)
       ctx.translate(-(x + w / 2), -(y + h / 2))
     }
 
+    // Paper backing
     if (frame === 'polaroid' || frame === 'classic' || template === 'polaroid') {
-      ctx.fillStyle = '#ffffff'
-      ctx.shadowColor = 'rgba(0,0,0,.18)'
-      ctx.shadowBlur = template === 'polaroid' ? 16 : 0
-      ctx.shadowOffsetY = template === 'polaroid' ? 6 : 0
-      roundRect(ctx, x - 2, y - 2, w + 4, h + 4, frame === 'polaroid' ? 3 : 6)
+      if (frame === 'polaroid') {
+        const paper = ctx.createLinearGradient(x, y, x + w, y + h)
+        paper.addColorStop(0, '#ffffff')
+        paper.addColorStop(1, '#f4f2ed')
+        ctx.fillStyle = paper
+      } else {
+        ctx.fillStyle = '#ffffff'
+      }
+      ctx.shadowColor = 'rgba(0,0,0,.28)'
+      ctx.shadowBlur = frame === 'polaroid' ? 22 : template === 'polaroid' ? 16 : 0
+      ctx.shadowOffsetY = frame === 'polaroid' ? 9 : template === 'polaroid' ? 6 : 0
+      roundRect(ctx, x, y, w, h, 6)
       ctx.fill()
       ctx.shadowColor = 'transparent'
+      ctx.shadowBlur = 0
+      ctx.shadowOffsetY = 0
     }
 
+    // Photo window — same geometry as the live camera preview
     const img = images[i]
     ctx.save()
-    roundRect(ctx, x + inset, y + inset, Math.max(1, w - inset * 2), Math.max(1, h - inset - bottomInset), frame === 'polaroid' ? 2 : 4)
+    roundRect(ctx, winX, winY, winW, winH, frame === 'polaroid' ? 3 : 4)
     ctx.clip()
     if (img) {
-      drawCover(ctx, img, x + inset, y + inset, Math.max(1, w - inset * 2), Math.max(1, h - inset - bottomInset))
+      drawCover(ctx, img, winX, winY, winW, winH)
     } else {
       ctx.fillStyle = light ? '#e6e9ef' : '#1f2735'
-      ctx.fillRect(x + inset, y + inset, Math.max(1, w - inset * 2), Math.max(1, h - inset - bottomInset))
+      ctx.fillRect(winX, winY, winW, winH)
     }
     ctx.restore()
+
+    // Thin inner line gives the print depth
+    if (frame === 'polaroid' || frame === 'classic') {
+      ctx.strokeStyle = frame === 'polaroid' ? 'rgba(0,0,0,.14)' : 'rgba(0,0,0,.08)'
+      ctx.lineWidth = 2
+      roundRect(ctx, winX + 1, winY + 1, Math.max(1, winW - 2), Math.max(1, winH - 2), frame === 'polaroid' ? 3 : 4)
+      ctx.stroke()
+    }
+
+    // Handwritten-style caption on the thick polaroid chin
+    if (frame === 'polaroid') {
+      const label = eventTitle || caption || 'snapgrid'
+      const fs = Math.max(14, Math.min(36, Math.round(w * 0.062)))
+      ctx.fillStyle = '#2b2f38'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.font = `italic 600 ${fs}px Geist, "Segoe UI", sans-serif`
+      ctx.save()
+      ctx.translate(x + w / 2, y + h - insetBottom / 2)
+      ctx.rotate((-1.5 * Math.PI) / 180)
+      ctx.fillText(label, 0, 0)
+      ctx.restore()
+    }
 
     if (frame === 'neon') {
       ctx.save()
@@ -235,16 +281,16 @@ export async function buildComposite(shots: string[], opts: CompositeOptions): P
       ctx.lineWidth = 4
       ctx.shadowColor = '#3d8bff'
       ctx.shadowBlur = 18
-      roundRect(ctx, x + 2, y + 2, w - 4, h - 4, 8)
+      roundRect(ctx, winX, winY, winW, winH, 6)
       ctx.stroke()
       ctx.restore()
     } else if (frame === 'gradient') {
-      const g = ctx.createLinearGradient(x, y, x + w, y + h)
+      const g = ctx.createLinearGradient(winX, winY, winX + winW, winY + winH)
       g.addColorStop(0, '#ffffff')
       g.addColorStop(1, '#9cc6ff')
       ctx.strokeStyle = g
       ctx.lineWidth = 3
-      roundRect(ctx, x + 2, y + 2, w - 4, h - 4, 8)
+      roundRect(ctx, winX, winY, winW, winH, 6)
       ctx.stroke()
     }
     ctx.restore()
@@ -266,39 +312,6 @@ export async function buildComposite(shots: string[], opts: CompositeOptions): P
   }
 
   return canvas.toDataURL('image/png')
-}
-
-/** A synthetic animated frame used when no camera is available (demo mode). */
-export function createDemoFrame(index: number, filter: string): string {
-  const canvas = document.createElement('canvas')
-  canvas.width = 640
-  canvas.height = 480
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return ''
-  const hue = (index * 47 + 200) % 360
-  const grad = ctx.createLinearGradient(0, 0, 640, 480)
-  grad.addColorStop(0, `hsl(${hue}, 70%, 58%)`)
-  grad.addColorStop(1, `hsl(${(hue + 80) % 360}, 75%, 32%)`)
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, 640, 480)
-  ctx.globalAlpha = 0.18
-  ctx.fillStyle = '#ffffff'
-  for (let i = 0; i < 7; i++) {
-    ctx.beginPath()
-    ctx.arc(60 + i * 95, 120 + Math.sin(index + i) * 90, 50 + (i % 3) * 22, 0, Math.PI * 2)
-    ctx.fill()
-  }
-  ctx.globalAlpha = 1
-  if (filter === 'bw' || filter === 'noir') ctx.filter = 'grayscale(1)'
-  ctx.fillStyle = 'rgba(255,255,255,.92)'
-  ctx.textAlign = 'center'
-  ctx.font = '700 42px Geist, sans-serif'
-  ctx.fillText('SNAPGRID', 320, 270)
-  ctx.font = '500 18px Geist Mono, monospace'
-  ctx.fillText(`DEMO FRAME · ${String(index + 1).padStart(2, '0')}`, 320, 305)
-  ctx.font = '600 15px Geist, sans-serif'
-  ctx.fillText(new Date().toLocaleTimeString(), 320, 340)
-  return canvas.toDataURL('image/jpeg', 0.9)
 }
 
 export function settingsToComposite(s: Settings): CompositeOptions {

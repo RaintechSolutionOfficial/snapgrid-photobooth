@@ -44,6 +44,7 @@ export type Settings = {
   countdown: number
   interval: number
   filter: string
+  effectId: string
   brightness: number
   contrast: number
   saturation: number

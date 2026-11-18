@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { Link } from 'react-router-dom'
 import {
   ArrowLeft, Camera, Grid3X3, Video, Repeat2, Timer, Settings2, Images, Download,
@@ -6,11 +7,13 @@ import {
   Sun, Moon, RotateCcw, FileArchive, Wand2, SlidersHorizontal, Layers, Check, Info,
 } from 'lucide-react'
 import type { Mode } from '../types'
-import { MODES, FRAMES, TEMPLATES, BACKGROUND_THEMES } from '../utils/constants'
+import { MODES, FRAMES, BACKGROUND_THEMES } from '../utils/constants'
 import { useTheme } from '../hooks/useTheme'
 import { useCamera } from '../hooks/useCamera'
 import { useFaceBox } from '../hooks/useFaceBox'
 import { resolveAccessories } from '../utils/effects'
+import { preloadAccessories } from '../utils/videoEffects'
+import { EffectCarousel } from '../components/camera/EffectCarousel'
 import { useCapture, type CapturePhase } from '../hooks/useCapture'
 import { usePhotoboothStore } from '../store/photoboothStore'
 import { CameraView } from '../components/camera/CameraView'
@@ -44,7 +47,6 @@ export function Studio() {
   const [flash, setFlash] = useState(false)
   const [qr, setQr] = useState<string | null>(null)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [accessoryFocus, setAccessoryFocus] = useState<string | null>(null)
   const [resultOpen, setResultOpen] = useState(false)
@@ -58,10 +60,15 @@ export function Studio() {
   )
   const faceTracked = Boolean(faceBox && settings.faceAutoPlace)
 
+  useEffect(() => {
+    preloadAccessories(resolvedAccessories)
+  }, [resolvedAccessories])
+
   const triggerFlash = useCallback(() => {
     setFlash(true)
     window.setTimeout(() => setFlash(false), 450)
   }, [])
+  const handleCaptureError = useCallback((msg: string) => toast.error(msg), [])
 
   const capture = useCapture({
     videoRef: cam.videoRef,
@@ -69,11 +76,21 @@ export function Studio() {
     settings,
     accessories: resolvedAccessories,
     onFlash: () => { if (settings.flash) triggerFlash() },
+    onError: handleCaptureError,
   })
 
-  const showToast = (msg: string) => {
-    setToast(msg)
-    window.setTimeout(() => setToast(null), 2600)
+  const showToast = (msg: string, kind: 'success' | 'error' = 'success') =>
+    kind === 'success' ? toast.success(msg) : toast.error(msg)
+
+  // This is a live booth — never fall back to synthetic demo frames.
+  const startCapture = () => {
+    if (cam.state !== 'ready') {
+      toast.error(cam.state === 'denied'
+        ? 'Camera permission denied — enable it in your browser.'
+        : 'Camera is not ready yet — please wait.')
+      return
+    }
+    void capture.start(mode)
   }
 
   const isBusy = capture.phase !== 'idle'
@@ -100,7 +117,7 @@ export function Studio() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.code === 'Space') {
         e.preventDefault()
-        if (!isBusy) void capture.start(mode)
+        if (!isBusy) startCapture()
       } else if (e.key === 'Escape') {
         if (isBusy) capture.cancel()
       } else if (e.key.toLowerCase() === 'g') setGalleryOpen(true)
@@ -111,7 +128,7 @@ export function Studio() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [mode, isBusy, capture.start, capture.cancel])
+  }, [mode, isBusy, startCapture, capture.cancel])
 
   // Read shared capture id from URL (from QR share)
   useEffect(() => {
@@ -127,13 +144,13 @@ export function Studio() {
   const previewImage = session.composite ?? session.shots[0] ?? null
 
   const handleDownloadPng = () => {
-    if (!previewImage) return showToast('Capture something first')
+    if (!previewImage) return showToast('Capture something first', 'error')
     downloadDataUrl(previewImage, `snapgrid-${stamp()}.png`)
     showToast('PNG downloaded')
   }
 
   const handleDownloadZip = async () => {
-    if (!previewImage) return showToast('Capture something first')
+    if (!previewImage) return showToast('Capture something first', 'error')
     const item = captures[0] ?? {
       id: 'current', createdAt: Date.now(), mode, rows: settings.rows, cols: settings.cols,
       frameCount: session.shots.length || 1, image: previewImage, filter: settings.filter, eventTitle: settings.eventTitle,
@@ -143,13 +160,13 @@ export function Studio() {
   }
 
   const handleQr = async () => {
-    if (!captures[0]) return showToast('Save a capture first')
+    if (!captures[0]) return showToast('Save a capture first', 'error')
     setQr(await generateQr(shareUrl(captures[0].id)))
   }
 
   const handlePrint = () => {
-    if (!previewImage) return showToast('Capture something first')
-    if (!printImage(previewImage, 'Snapgrid Print')) showToast('Allow pop-ups to print')
+    if (!previewImage) return showToast('Capture something first', 'error')
+    if (!printImage(previewImage, 'Snapgrid Print')) showToast('Allow pop-ups to print', 'error')
   }
 
   const handleRetake = () => {
@@ -213,7 +230,14 @@ export function Studio() {
           {mode === 'grid' && (
             <section className="card p-4 reveal is-visible">
               <span className="label">Grid builder</span>
-              <GridBuilder rows={settings.rows} cols={settings.cols} onChange={(rows, cols) => updateSettings({ rows, cols })} disabled={isBusy} />
+              <GridBuilder
+                rows={settings.rows}
+                cols={settings.cols}
+                template={settings.template}
+                onChange={(rows, cols) => updateSettings({ rows, cols })}
+                onTemplateChange={(template) => updateSettings({ template })}
+                disabled={isBusy}
+              />
             </section>
           )}
 
@@ -283,7 +307,7 @@ export function Studio() {
             ) : (
               <>
                 <button className="btn btn-ghost" onClick={cam.switchFacing}><SwitchCamera size={16} /> <span className="hidden sm:inline">Flip camera</span></button>
-                <button className="btn btn-primary !px-8 !py-3.5 text-base btn-shine magnetic" onClick={() => void capture.start(mode)}>
+                <button className="btn btn-primary !px-8 !py-3.5 text-base btn-shine magnetic" onClick={startCapture}>
                   <Play size={18} fill="currentColor" />
                   {mode === 'photo' ? 'Take photo' : mode === 'grid' ? `Capture ${settings.rows * settings.cols} shots` : mode === 'video' ? 'Record video' : 'Record boomerang'}
                 </button>
@@ -385,19 +409,6 @@ export function Studio() {
                       {FRAMES.map((f) => <button key={f.id} className="chip" data-active={settings.frame === f.id} onClick={() => updateSettings({ frame: f.id })}>{f.name}</button>)}
                     </div>
                   </div>
-                  {mode === 'grid' && (
-                    <div>
-                      <span className="label">Collage template</span>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {TEMPLATES.map((t) => (
-                          <button key={t.id} className={`text-left p-2 rounded-xl border transition-colors ${settings.template === t.id ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--line)] bg-[var(--surface-2)] hover:border-[var(--line-2)]'}`} onClick={() => updateSettings({ template: t.id })} title={t.hint}>
-                            <span className={`text-[11px] font-semibold ${settings.template === t.id ? 'text-[var(--accent)]' : 'text-[var(--ink)]'}`}>{t.name}</span>
-                            <span className="block text-[9px] text-[var(--muted)] truncate">{t.hint}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                   <div>
                     <span className="label">Background theme</span>
                     <div className="grid grid-cols-5 gap-2">
@@ -436,12 +447,21 @@ export function Studio() {
 
               {panel === 'overlay' && <OverlayControls settings={settings} update={updateSettings} />}
               {panel === 'effects' && (
-                <EffectsPanel
-                  settings={settings}
-                  update={updateSettings}
-                  selectedId={accessoryFocus}
-                  onSelect={setAccessoryFocus}
-                />
+                <div className="space-y-5">
+                  <EffectCarousel
+                    videoRef={cam.videoRef}
+                    cameraReady={cam.state === 'ready'}
+                    settings={settings}
+                    onSelect={(effectId) => updateSettings({ effectId })}
+                  />
+                  <div className="divider" />
+                  <EffectsPanel
+                    settings={settings}
+                    update={updateSettings}
+                    selectedId={accessoryFocus}
+                    onSelect={setAccessoryFocus}
+                  />
+                </div>
               )}
             </div>
           </div>
@@ -486,9 +506,6 @@ export function Studio() {
           </div>
         </div>
       )}
-
-      {/* Toast */}
-      {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-full bg-[#0a0e17] text-white text-[13px] font-medium shadow-2xl flex items-center gap-2 animate-[fadeIn_.2s_ease]"><Check size={15} className="text-emerald-400" /> {toast}</div>}
     </div>
   )
 }

@@ -73,6 +73,7 @@ export const DEFAULT_SETTINGS: Settings = {
   countdown: 3,
   interval: 1,
   filter: 'none',
+  effectId: 'original',
   brightness: 100,
   contrast: 100,
   saturation: 100,

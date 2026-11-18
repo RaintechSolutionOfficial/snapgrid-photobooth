@@ -1,11 +1,11 @@
 import { useCallback, useRef, useState, type RefObject } from 'react'
 import type { Accessory, CaptureItem, Mode, Settings } from '../types'
 import { usePhotoboothStore } from '../store/photoboothStore'
-import { drawVideoCover, grabFrame } from './useCamera'
-import { buildComposite, createDemoFrame, settingsToComposite } from '../utils/composite'
+import { buildComposite, settingsToComposite } from '../utils/composite'
 import { playCountdownTick, playShutter, playSuccess } from '../utils/audio'
 import { buildBoomerang } from '../utils/boomerang'
-import { accessoriesForShot, applyAccessories } from '../utils/effects'
+import { accessoriesForShot } from '../utils/effects'
+import { renderFrame } from '../utils/videoEffects'
 import { stamp } from '../utils/download'
 import { compressForStorage } from '../utils/storage'
 
@@ -19,9 +19,10 @@ type Args = {
   settings: Settings
   accessories?: Accessory[]
   onFlash: () => void
+  onError: (msg: string) => void
 }
 
-export function useCapture({ videoRef, cameraReady, settings, accessories, onFlash }: Args) {
+export function useCapture({ videoRef, cameraReady, settings, accessories, onFlash, onError }: Args) {
   const addCapture = usePhotoboothStore((s) => s.addCapture)
   const setSession = usePhotoboothStore((s) => s.setSession)
 
@@ -59,16 +60,24 @@ export function useCapture({ videoRef, cameraReady, settings, accessories, onFla
   }, [tick])
 
   const takeFrame = useCallback(async (index: number) => {
-    const raw = cameraReady && videoRef.current
-      ? grabFrame(videoRef.current, {
-          filter: settings.filter,
-          brightness: settings.brightness,
-          contrast: settings.contrast,
-          saturation: settings.saturation,
-          mirror: settings.mirror,
-        }) ?? createDemoFrame(index, settings.filter)
-      : createDemoFrame(index, settings.filter)
-    return applyAccessories(raw, accessoriesForShot(index, settings, activeAccessories))
+    // Live booth: a frame can only come from the real camera, never a synthetic demo.
+    if (!cameraReady || !videoRef.current?.videoWidth) return null
+    const canvas = document.createElement('canvas')
+    canvas.width = 1280
+    canvas.height = 960
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    renderFrame(ctx, videoRef.current, {
+      effectId: settings.effectId,
+      filter: settings.filter,
+      brightness: settings.brightness,
+      contrast: settings.contrast,
+      saturation: settings.saturation,
+      mirror: settings.mirror,
+      accessories: accessoriesForShot(index, settings, activeAccessories),
+      time: performance.now(),
+    }, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', 0.94)
   }, [cameraReady, videoRef, settings, activeAccessories])
 
   const persist = useCallback(async (mode: Mode, shots: string[], composite: string | null, duration?: number) => {
@@ -86,10 +95,10 @@ export function useCapture({ videoRef, cameraReady, settings, accessories, onFla
       duration,
     }
     const ok = addCapture(item)
-    if (!ok) window.alert('Local storage is full — please delete a few old captures from the gallery and try again.')
+    if (!ok) onError('Local storage is full — delete a few old captures from the gallery and try again.')
     success()
     return item
-  }, [addCapture, settings, success])
+  }, [addCapture, settings, success, onError])
 
   const captureStill = useCallback(async () => {
     if (!(await runCountdown(settings.countdown))) return
@@ -98,10 +107,15 @@ export function useCapture({ videoRef, cameraReady, settings, accessories, onFla
     shutter()
     await sleep(120)
     const frame = await takeFrame(0)
+    if (!frame) {
+      setPhase('idle')
+      onError('Camera unavailable — capture cancelled.')
+      return
+    }
     setSession({ shots: [frame], composite: frame, videoUrl: null })
     persist('photo', [frame], frame)
     setPhase('idle')
-  }, [runCountdown, settings.countdown, onFlash, shutter, takeFrame, setSession, persist])
+  }, [runCountdown, settings.countdown, onFlash, shutter, takeFrame, setSession, persist, onError])
 
   const captureGrid = useCallback(async () => {
     const shots: string[] = []
@@ -114,7 +128,14 @@ export function useCapture({ videoRef, cameraReady, settings, accessories, onFla
       onFlash()
       shutter()
       await sleep(110)
-      shots.push(await takeFrame(i))
+      const frame = await takeFrame(i)
+      if (!frame) {
+        setPhase('idle')
+        setCurrentIndex(0)
+        onError('Camera unavailable — capture cancelled.')
+        return
+      }
+      shots.push(frame)
       setCurrentIndex(i + 1)
       setSession({ shots: [...shots], composite: null })
       if (i < count - 1 && settings.interval > 0) {
@@ -128,10 +149,14 @@ export function useCapture({ videoRef, cameraReady, settings, accessories, onFla
     persist('grid', shots, composite)
     setPhase('idle')
     setCurrentIndex(0)
-  }, [settings, runCountdown, onFlash, shutter, takeFrame, setSession, persist])
+  }, [settings, runCountdown, onFlash, shutter, takeFrame, setSession, persist, onError])
 
   const captureVideo = useCallback(async (mode: 'video' | 'boomerang') => {
     const duration = mode === 'video' ? 6 : 3
+    if (!cameraReady || !videoRef.current?.videoWidth) {
+      onError('Camera unavailable — capture cancelled.')
+      return
+    }
     if (!(await runCountdown(settings.countdown))) return
     setPhase('recording')
 
@@ -152,30 +177,23 @@ export function useCapture({ videoRef, cameraReady, settings, accessories, onFla
     const collectedFrames: string[] = []
     const started = performance.now()
     const draw = () => {
-      const ratio = Math.min(1, (performance.now() - started) / (duration * 1000))
       setRecordedSeconds(Math.min(duration, Math.floor((performance.now() - started) / 1000)))
-      ctx.save()
-      if (settings.mirror) {
-        ctx.translate(canvas.width, 0)
-        ctx.scale(-1, 1)
-      }
-      const preset = settings.filter === 'none' ? '' : settings.filter + ' '
-      ctx.filter = `${preset}brightness(${settings.brightness}%) contrast(${settings.contrast}%) saturate(${settings.saturation}%)`
       const video = videoRef.current
       if (cameraReady && video?.videoWidth) {
-        drawVideoCover(ctx, video, canvas.width, canvas.height)
+        renderFrame(ctx, video, {
+          effectId: settings.effectId,
+          filter: settings.filter,
+          brightness: settings.brightness,
+          contrast: settings.contrast,
+          saturation: settings.saturation,
+          mirror: settings.mirror,
+          accessories: activeAccessories,
+          time: performance.now(),
+        }, canvas.width, canvas.height)
       } else {
-        const g = ctx.createLinearGradient(0, 0, 640, 480)
-        g.addColorStop(0, `hsl(${200 + ratio * 120}, 70%, 45%)`)
-        g.addColorStop(1, '#101827')
-        ctx.fillStyle = g
-        ctx.fillRect(0, 0, 640, 480)
-        ctx.fillStyle = '#fff'
-        ctx.textAlign = 'center'
-        ctx.font = '700 34px Geist, sans-serif'
-        ctx.fillText(mode === 'video' ? 'RECORDING' : 'BOOMERANG', 320, 250)
+        ctx.fillStyle = '#0a0d14'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
       }
-      ctx.restore()
       if (mode === 'boomerang' && performance.now() - lastSample > 110) {
         lastSample = performance.now()
         collectedFrames.push(canvas.toDataURL('image/jpeg', 0.82))
@@ -202,17 +220,10 @@ export function useCapture({ videoRef, cameraReady, settings, accessories, onFla
     let url = URL.createObjectURL(new Blob(chunks, { type: recorder.mimeType || 'video/webm' }))
     let poster = canvas.toDataURL('image/jpeg', 0.9)
 
-    if (activeAccessories.length) {
-      poster = await applyAccessories(poster, activeAccessories)
-    }
-
     if (mode === 'boomerang') {
       setPhase('finishing')
       try {
-        const decorated = await Promise.all(
-          collectedFrames.map((f, i) => applyAccessories(f, accessoriesForShot(i, settings, activeAccessories))),
-        )
-        const result = await buildBoomerang(decorated)
+        const result = await buildBoomerang(collectedFrames)
         url = result.url
         poster = result.poster
       } catch {
@@ -224,7 +235,7 @@ export function useCapture({ videoRef, cameraReady, settings, accessories, onFla
     persist(mode, [poster], poster, duration)
     setRecordedSeconds(0)
     setPhase('idle')
-  }, [settings, runCountdown, cameraReady, videoRef, setSession, persist, activeAccessories])
+  }, [settings, runCountdown, cameraReady, videoRef, setSession, persist, activeAccessories, onError])
 
   const startMode = useCallback(async (activeMode: Mode) => {
     if (phase !== 'idle') return

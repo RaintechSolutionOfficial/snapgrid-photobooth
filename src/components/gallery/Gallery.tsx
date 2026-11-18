@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import {
   Images, X, Download, Trash2, QrCode, Printer, CalendarClock, Grid3X3,
   Video, Camera, Expand, FileArchive, HardDrive, RefreshCw, Search, CheckCircle2,
@@ -181,7 +182,7 @@ export function Gallery({ open, onClose }: Props) {
               <div className="grid grid-cols-2 gap-2 mt-auto">
                 <button className="btn btn-sm btn-primary col-span-2" onClick={() => downloadDataUrl(selected.image, `snapgrid-${stamp()}.png`)}><Download size={14} /> Download</button>
                 <button className="btn btn-sm btn-ghost" onClick={() => void downloadZip(selected)}><FileArchive size={14} /> ZIP</button>
-                <button className="btn btn-sm btn-ghost" onClick={() => { if (!printImage(selected.image, 'Snapgrid')) window.alert('Please allow pop-ups to print.') }}><Printer size={14} /> Print</button>
+                <button className="btn btn-sm btn-ghost" onClick={() => { if (!printImage(selected.image, 'Snapgrid')) toast.error('Please allow pop-ups to print.') }}><Printer size={14} /> Print</button>
                 <button className="btn btn-sm btn-soft col-span-2" onClick={() => void openQr(selected)}><QrCode size={14} /> Share via QR</button>
                 <button className="btn btn-sm btn-danger col-span-2" onClick={() => { removeCapture(selected.id); setSelected(null); setQr(null) }}><Trash2 size={14} /> Delete from history</button>
               </div>
