@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Sparkles, X, RotateCcw, Shuffle, Layers3, ScanFace } from 'lucide-react'
+import { Sparkles, X, RotateCcw, Shuffle, Layers3, ScanFace, Crown, Ear, Smile, PartyPopper, type LucideIcon } from 'lucide-react'
 import type { Settings } from '../../types'
 import { EFFECTS, EFFECT_CATEGORIES, makeAccessory, type EffectCategory } from '../../utils/effects'
 import { EFFECT_MODES } from '../../utils/constants'
@@ -10,6 +10,13 @@ type Props = {
   update: (patch: Partial<Settings>) => void
   selectedId: string | null
   onSelect: (id: string | null) => void
+}
+
+const categoryIcons: Record<EffectCategory, LucideIcon> = {
+  Hats: Crown,
+  'Ears & horns': Ear,
+  Face: Smile,
+  Fun: PartyPopper,
 }
 
 export function EffectsPanel({ settings, update, selectedId, onSelect }: Props) {
@@ -48,21 +55,31 @@ export function EffectsPanel({ settings, update, selectedId, onSelect }: Props) 
           <button className="switch" data-on={settings.faceAutoPlace} onClick={() => update({ faceAutoPlace: !settings.faceAutoPlace })} aria-label="Toggle face tracking" />
         </label>
         <div className="flex flex-wrap gap-1.5 mb-3">
-          {EFFECT_CATEGORIES.map((c) => (
-            <button key={c} className="chip" data-active={category === c} onClick={() => setCategory(c)}>{c}</button>
-          ))}
+          {EFFECT_CATEGORIES.map((c) => {
+            const Icon = categoryIcons[c]
+            return (
+              <button key={c} className="chip" data-active={category === c} onClick={() => setCategory(c)}>
+                <Icon size={12} /> {c}
+              </button>
+            )
+          })}
         </div>
         <div className="grid grid-cols-4 gap-2">
           {visible.map((def) => (
             <button
               key={def.id}
-              className="group flex flex-col items-center gap-1 p-2 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] transition-all"
+              className="group relative flex flex-col items-center gap-1 p-2 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] transition-all"
               onClick={() => add(def)}
               title={`Add ${def.name}`}
             >
               <span className="w-11 h-11 flex items-center justify-center text-3xl leading-none">
                 {def.kind === 'emoji' ? def.source : <img src={def.source} alt="" className="w-10 h-10 object-contain" />}
               </span>
+              {def.kind === 'emoji' && (
+                <span className="absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-[var(--accent)] text-white flex items-center justify-center">
+                  <Smile size={9} />
+                </span>
+              )}
               <span className="text-[9px] text-[var(--muted)] group-hover:text-[var(--accent)] text-center leading-tight">{def.name}</span>
             </button>
           ))}

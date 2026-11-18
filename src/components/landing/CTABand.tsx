@@ -1,14 +1,20 @@
+import { Fragment } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Sparkles } from 'lucide-react'
 
-const phrase = 'OPEN THE BOOTH  ✦  EVERY MOMENT, PERFECTLY FRAMED  ✦  '
+const phrase = ['OPEN THE BOOTH', 'EVERY MOMENT, PERFECTLY FRAMED']
 
 function MarqueeGroup() {
   return (
     <span className="flex shrink-0 items-center">
       {Array.from({ length: 4 }, (_, i) => (
-        <span key={i} className="whitespace-pre px-2 text-[clamp(1.4rem,3vw,2.4rem)] font-extrabold uppercase tracking-tight text-white/25">
-          {phrase}
+        <span key={i} className="flex shrink-0 items-center gap-5 px-2 text-[clamp(1.4rem,3vw,2.4rem)] font-extrabold uppercase tracking-tight text-white/25">
+          {phrase.map((part, j) => (
+            <Fragment key={j}>
+              <span className="whitespace-nowrap">{part}</span>
+              <Sparkles size={22} className="shrink-0 text-white/25" strokeWidth={1.8} />
+            </Fragment>
+          ))}
         </span>
       ))}
     </span>

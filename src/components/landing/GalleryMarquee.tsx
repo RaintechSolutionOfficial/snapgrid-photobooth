@@ -1,23 +1,23 @@
-import { Images } from 'lucide-react'
+import { Camera, Flower2, Heart, Images, PartyPopper, Smile, Sparkles, Sun, type LucideIcon } from 'lucide-react'
 import { usePhotoboothStore } from '../../store/photoboothStore'
 
 type Tile = {
   key: string
   grad: string
-  emoji: string
+  icon: LucideIcon
   label: string
   image?: string
 }
 
 const samples: Tile[] = [
-  { key: 's1', grad: 'linear-gradient(140deg,#ff9a9e,#fad0c4)', emoji: '🎈', label: 'Birthday bash' },
-  { key: 's2', grad: 'linear-gradient(140deg,#a18cd1,#fbc2eb)', emoji: '✨', label: 'Neon nights' },
-  { key: 's3', grad: 'linear-gradient(140deg,#84fab0,#8fd3f4)', emoji: '🌿', label: 'Garden party' },
-  { key: 's4', grad: 'linear-gradient(140deg,#f6d365,#fda085)', emoji: '🌅', label: 'Golden hour' },
-  { key: 's5', grad: 'linear-gradient(140deg,#ffecd2,#fcb69f)', emoji: '💛', label: 'Sunset crew' },
-  { key: 's6', grad: 'linear-gradient(140deg,#a1c4fd,#c2e9fb)', emoji: '💙', label: 'Blue hour' },
-  { key: 's7', grad: 'linear-gradient(140deg,#fbc2eb,#a6c1ee)', emoji: '🎉', label: 'Celebrate' },
-  { key: 's8', grad: 'linear-gradient(140deg,#d4fc79,#96e6a1)', emoji: '🥳', label: 'Good vibes' },
+  { key: 's1', grad: 'linear-gradient(140deg,#ff9a9e,#fad0c4)', icon: PartyPopper, label: 'Birthday bash' },
+  { key: 's2', grad: 'linear-gradient(140deg,#a18cd1,#fbc2eb)', icon: Sparkles, label: 'Neon nights' },
+  { key: 's3', grad: 'linear-gradient(140deg,#84fab0,#8fd3f4)', icon: Flower2, label: 'Garden party' },
+  { key: 's4', grad: 'linear-gradient(140deg,#f6d365,#fda085)', icon: Sun, label: 'Golden hour' },
+  { key: 's5', grad: 'linear-gradient(140deg,#ffecd2,#fcb69f)', icon: Heart, label: 'Sunset crew' },
+  { key: 's6', grad: 'linear-gradient(140deg,#a1c4fd,#c2e9fb)', icon: Sparkles, label: 'Blue hour' },
+  { key: 's7', grad: 'linear-gradient(140deg,#fbc2eb,#a6c1ee)', icon: PartyPopper, label: 'Celebrate' },
+  { key: 's8', grad: 'linear-gradient(140deg,#d4fc79,#96e6a1)', icon: Smile, label: 'Good vibes' },
 ]
 
 function PhotoTile({ tile }: { tile: Tile }) {
@@ -27,7 +27,7 @@ function PhotoTile({ tile }: { tile: Tile }) {
         <img src={tile.image} alt={tile.label} className="h-full w-full object-cover" />
       ) : (
         <div className="flex h-full w-full items-center justify-center" style={{ background: tile.grad }}>
-          <span className="text-[44px] drop-shadow-sm">{tile.emoji}</span>
+          <tile.icon size={44} className="text-white drop-shadow-sm" strokeWidth={1.6} />
         </div>
       )}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/45 to-transparent px-3 pb-2.5 pt-8">
@@ -56,7 +56,7 @@ export default function GalleryMarquee() {
   const realTiles: Tile[] = captures.slice(0, 4).map((capture, index) => ({
     key: `real-${capture.id ?? index}`,
     grad: 'linear-gradient(140deg,#a1c4fd,#c2e9fb)',
-    emoji: '📸',
+    icon: Camera,
     label: capture.eventTitle || 'Your capture',
     image: capture.image,
   }))

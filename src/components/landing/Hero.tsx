@@ -1,11 +1,11 @@
 import { Link } from 'react-router-dom'
-import { ArrowRight, Camera, Play, Sparkles } from 'lucide-react'
+import { ArrowRight, Camera, Droplets, Leaf, Play, Sparkles, Sun, type LucideIcon } from 'lucide-react'
 
-const tiles = [
-  { grad: 'linear-gradient(140deg,#ffb199,#ff0844)', emoji: '🌅', label: 'Golden hour' },
-  { grad: 'linear-gradient(140deg,#a1c4fd,#5b86e5)', emoji: '💙', label: 'Blue hour' },
-  { grad: 'linear-gradient(140deg,#fbc2eb,#a18cd1)', emoji: '✨', label: 'Soft glow' },
-  { grad: 'linear-gradient(140deg,#84fab0,#8fd3f4)', emoji: '🌿', label: 'Fresh cut' },
+const tiles: { grad: string; icon: LucideIcon; label: string }[] = [
+  { grad: 'linear-gradient(140deg,#ffb199,#ff0844)', icon: Sun, label: 'Golden hour' },
+  { grad: 'linear-gradient(140deg,#a1c4fd,#5b86e5)', icon: Droplets, label: 'Blue hour' },
+  { grad: 'linear-gradient(140deg,#fbc2eb,#a18cd1)', icon: Sparkles, label: 'Soft glow' },
+  { grad: 'linear-gradient(140deg,#84fab0,#8fd3f4)', icon: Leaf, label: 'Fresh cut' },
 ]
 
 const quickStats = [
@@ -84,7 +84,7 @@ export default function Hero() {
                   className="relative flex h-[86px] items-center justify-center overflow-hidden rounded-[14px] sm:h-[96px]"
                   style={{ background: tile.grad }}
                 >
-                  <span className="text-[30px] drop-shadow-sm">{tile.emoji}</span>
+                  <tile.icon size={30} className="text-white drop-shadow-sm" strokeWidth={1.8} />
                   <span className="absolute bottom-1.5 left-2 rounded-full bg-black/20 px-2 py-0.5 text-[9px] font-medium text-white backdrop-blur-sm">
                     {tile.label}
                   </span>

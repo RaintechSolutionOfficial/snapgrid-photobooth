@@ -98,8 +98,8 @@ function Preview({ mode }: { mode: Mode }) {
         >
           <Repeat2 size={30} className="text-white drop-shadow" />
         </div>
-        <span className="mono absolute bottom-0 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-[10px] font-semibold text-[var(--accent)] shadow-[var(--shadow-pill)]">
-          ↻ loop
+        <span className="absolute bottom-0 inline-flex items-center gap-1 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-[10px] font-semibold text-[var(--accent)] shadow-[var(--shadow-pill)]">
+          <Repeat2 size={11} /> loop
         </span>
       </div>
     )
@@ -109,7 +109,7 @@ function Preview({ mode }: { mode: Mode }) {
       className="relative grid h-[220px] w-full max-w-[300px] place-items-center overflow-hidden rounded-2xl border border-[var(--line)] shadow-[var(--shadow-card)]"
       style={{ background: miniGradients[0] }}
     >
-      <span className="text-[56px] drop-shadow-sm">📸</span>
+      <Camera size={56} className="text-white drop-shadow-sm" strokeWidth={1.6} />
       <span className="mono absolute left-3 top-3 rounded-full bg-black/35 px-2.5 py-1 text-[10px] font-semibold text-white backdrop-blur">
         1 / 1
       </span>
