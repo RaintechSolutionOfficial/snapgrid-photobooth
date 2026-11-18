@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import type { Mode } from '../types'
 import { MODES, FRAMES, BACKGROUND_THEMES } from '../utils/constants'
+import { stageAspect } from '../utils/composite'
 import { useTheme } from '../hooks/useTheme'
 import { useCamera } from '../hooks/useCamera'
 import { useFaceBox } from '../hooks/useFaceBox'
@@ -269,7 +270,10 @@ export function Studio() {
 
         {/* CENTER: CAMERA */}
         <main className="order-1 md:order-1 xl:order-2 min-w-0 space-y-4">
-          <div className="relative aspect-[4/3] w-full">
+          <div
+            className="relative w-full"
+            style={{ aspectRatio: mode === 'grid' ? stageAspect(settings.template, settings.rows, settings.cols, settings.rows * settings.cols) : 4 / 3 }}
+          >
             <CameraView
               videoRef={cam.videoRef}
               cameraState={cam.state}
@@ -307,7 +311,12 @@ export function Studio() {
             ) : (
               <>
                 <button className="btn btn-ghost" onClick={cam.switchFacing}><SwitchCamera size={16} /> <span className="hidden sm:inline">Flip camera</span></button>
-                <button className="btn btn-primary !px-8 !py-3.5 text-base btn-shine magnetic" onClick={startCapture}>
+                <button
+                  className="btn btn-primary !px-8 !py-3.5 text-base btn-shine magnetic"
+                  onClick={startCapture}
+                  disabled={cam.state !== 'ready'}
+                  title={cam.state === 'ready' ? undefined : 'Camera must be ready before capturing'}
+                >
                   <Play size={18} fill="currentColor" />
                   {mode === 'photo' ? 'Take photo' : mode === 'grid' ? `Capture ${settings.rows * settings.cols} shots` : mode === 'video' ? 'Record video' : 'Record boomerang'}
                 </button>

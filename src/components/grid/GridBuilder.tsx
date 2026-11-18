@@ -1,6 +1,7 @@
 import { Minus, Plus, Grid3X3 } from 'lucide-react'
 import { GRID_PRESETS, TEMPLATES } from '../../utils/constants'
 import type { TemplateId } from '../../types'
+import { computeLayout } from '../../utils/composite'
 
 type Props = {
   rows: number
@@ -28,41 +29,24 @@ function Stepper({ label, value, onChange, disabled }: { label: string; value: n
   )
 }
 
-/** Miniature live preview of the selected collage template. */
+/** Miniature preview driven by the exact same layout as the camera and final collage. */
 function LayoutPreview({ rows, cols, template }: { rows: number; cols: number; template: TemplateId }) {
   const count = rows * cols
-  if (template === 'strip' || template === 'filmstrip') {
-    const horizontal = template === 'filmstrip'
-    return (
-      <div
-        className={`grid gap-0.5 ${horizontal ? 'h-9' : 'w-9'}`}
-        style={{
-          gridTemplateRows: horizontal ? '1fr' : `repeat(${count}, 1fr)`,
-          gridTemplateColumns: horizontal ? `repeat(${count}, 1fr)` : '1fr',
-        }}
-      >
-        {Array.from({ length: count }).map((_, i) => <span key={i} className="rounded-[2px] bg-[var(--accent)] opacity-70" />)}
-      </div>
-    )
-  }
-  if (template === 'mosaic') {
-    return (
-      <div className="grid grid-cols-3 gap-0.5 h-12" style={{ gridTemplateRows: '1.4fr 1fr' }}>
-        <span className="col-span-3 rounded-[2px] bg-[var(--accent)] opacity-80" />
-        {Array.from({ length: Math.min(count - 1, 6) }).map((_, i) => <span key={i} className="rounded-[2px] bg-[var(--accent)] opacity-60" />)}
-      </div>
-    )
-  }
+  const { cells, aspect } = computeLayout(template, rows, cols, count)
   return (
-    <div
-      className="grid gap-0.5 h-12"
-      style={{ gridTemplateRows: `repeat(${rows}, 1fr)`, gridTemplateColumns: `repeat(${cols}, 1fr)` }}
-    >
-      {Array.from({ length: count }).map((_, i) => (
+    <div className="relative w-12" style={{ aspectRatio: Math.min(2.1, Math.max(0.85, aspect)) }}>
+      {cells.slice(0, count).map((cell, i) => (
         <span
           key={i}
-          className="rounded-[2px] bg-[var(--accent)] opacity-70"
-          style={template === 'polaroid' ? { transform: `rotate(${((i * 37) % 7) - 3}deg)` } : undefined}
+          className="absolute rounded-[2px] bg-[var(--accent)]"
+          style={{
+            left: `${cell.x * 100}%`,
+            top: `${cell.y * 100}%`,
+            width: `${cell.w * 100}%`,
+            height: `${cell.h * 100}%`,
+            opacity: i === 0 ? 0.85 : 0.6,
+            transform: cell.rotation ? `rotate(${cell.rotation}deg)` : undefined,
+          }}
         />
       ))}
     </div>

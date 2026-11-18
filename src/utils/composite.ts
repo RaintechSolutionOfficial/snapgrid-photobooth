@@ -115,6 +115,29 @@ export function layoutCells(
   }
 }
 
+export type LayoutCell = { x: number; y: number; w: number; h: number; rotation: number }
+export type Layout = { cells: LayoutCell[]; aspect: number }
+
+/** Normalized (0-1) cell geometry shared by the live camera preview and the final collage. */
+export function computeLayout(template: TemplateId, rows: number, cols: number, count: number): Layout {
+  const { cells, width, height } = layoutCells(template, rows, cols, count, 0, 0, 0)
+  return {
+    cells: cells.map((c) => ({
+      x: c.x / width,
+      y: c.y / height,
+      w: c.w / width,
+      h: c.h / height,
+      rotation: c.rotation,
+    })),
+    aspect: width / height,
+  }
+}
+
+/** Keeps template previews usable: tall strips and long filmstrips are clamped. */
+export function stageAspect(template: TemplateId, rows: number, cols: number, count: number): number {
+  return Math.min(2.1, Math.max(0.85, computeLayout(template, rows, cols, count).aspect))
+}
+
 export type CompositeOptions = {
   rows: number
   cols: number

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type RefObject, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject, type PointerEvent as ReactPointerEvent } from 'react'
 import { Camera, CameraOff, RotateCcw, Maximize, Minimize, SwitchCamera, Sparkles, Loader2, Check, ScanFace, Images } from 'lucide-react'
 import type { Accessory, Settings } from '../../types'
 import type { CameraState } from '../../hooks/useCamera'
 import { drawDemoFrame, renderFrame } from '../../utils/videoEffects'
+import { computeLayout } from '../../utils/composite'
 import { CountdownRing } from './CountdownRing'
 import { FrameOverlay } from './FrameOverlay'
 import type { CapturePhase } from '../../hooks/useCapture'
@@ -123,35 +124,36 @@ export function CameraView({
   const recording = phase === 'recording'
   const gridMode = activeMode === 'grid' && settings.rows > 1
 
-  // In grid mode the live preview is confined to a single cell (1 out of N),
-  // the one that will be captured next. Otherwise it fills the whole stage.
-  const rows = gridMode ? settings.rows : 1
-  const cols = gridMode ? settings.cols : 1
-  const gridCount = rows * cols
+  // The camera uses the same normalized layout as the final collage, so every
+  // template (strip, filmstrip, mosaic, polaroid…) is visible while shooting.
+  const layout = useMemo(
+    () => gridMode
+      ? computeLayout(settings.template, settings.rows, settings.cols, settings.rows * settings.cols)
+      : { cells: [{ x: 0, y: 0, w: 1, h: 1, rotation: 0 }], aspect: 4 / 3 },
+    [gridMode, settings.template, settings.rows, settings.cols],
+  )
+  const gridCount = layout.cells.length
   const captured = Math.min(gridShots.length, gridCount)
   // Follow the shot being taken; at rest the preview sits in the first cell.
   const activeCell = phase === 'idle' ? 0 : Math.min(currentIndex, gridCount - 1)
-  const activeRow = Math.floor(activeCell / cols)
-  const activeCol = activeCell % cols
+  const activeRect = layout.cells[activeCell] ?? layout.cells[0]
+  const cellStyle = (c: { x: number; y: number; w: number; h: number; rotation: number }): CSSProperties => ({
+    left: `${c.x * 100}%`,
+    top: `${c.y * 100}%`,
+    width: `${c.w * 100}%`,
+    height: `${c.h * 100}%`,
+    transform: c.rotation ? `rotate(${c.rotation}deg)` : undefined,
+  })
   const frameCaption = settings.eventTitle || settings.caption || 'snapgrid'
 
   return (
     <div className="camera-stage relative w-full h-full min-h-[320px] rounded-[24px] border border-[var(--line-2)] shadow-[var(--shadow-card)] overflow-hidden [container-type:inline-size]">
-      {/* Shared grid: the live preview occupies one cell, the guide boxes sit on top. */}
-      <div
-        className="absolute"
-        style={{
-          inset: gridMode ? '3.5%' : 0,
-          display: 'grid',
-          gridTemplateRows: `repeat(${rows}, 1fr)`,
-          gridTemplateColumns: `repeat(${cols}, 1fr)`,
-          gap: gridMode ? 5 : 0,
-        }}
-      >
+      {/* Template layout: normalized cells from the same function that builds the final collage. */}
+      <div className="absolute" style={{ inset: gridMode ? '3.5%' : 0 }}>
         {/* Live camera + effects, wrapped in the selected paper frame */}
         <div
-          className={`relative ${gridMode ? 'rounded-lg' : ''}`}
-          style={{ gridRow: activeRow + 1, gridColumn: activeCol + 1 }}
+          className={`absolute ${gridMode ? 'rounded-lg' : ''}`}
+          style={{ ...cellStyle(activeRect), zIndex: 5 }}
         >
           <FrameOverlay frame={settings.frame} caption={frameCaption} interactive windowRef={viewportRef}>
             <div className="absolute inset-0 [container-type:inline-size] bg-[#0a0d14]">
@@ -230,15 +232,23 @@ export function CameraView({
         </div>
 
         {/* Per-shot grid guide — shows captured shots and highlights the next one */}
-        {gridMode && ready && Array.from({ length: gridCount }).map((_, i) => {
+        {gridMode && ready && layout.cells.map((cell, i) => {
           const shot = gridShots[i]
           const isNext = i === captured && phase !== 'idle'
           const isDone = Boolean(shot)
+          const isActive = i === activeCell
+          const tone = isDone
+            ? 'border-2 border-emerald-400/80 shadow-[0_0_0_1px_rgba(0,0,0,.2)]'
+            : isNext
+              ? 'border-2 border-[var(--accent-2)] bg-white/5 shadow-[0_0_22px_rgba(79,163,255,.35)]'
+              : isActive
+                ? 'border border-white/20'
+                : 'border border-white/25 bg-black/10'
           return (
             <div
               key={i}
-              className={`relative rounded-lg overflow-hidden transition-all duration-300 pointer-events-none z-[6] ${isDone ? 'border-2 border-emerald-400/80 shadow-[0_0_0_1px_rgba(0,0,0,.2)]' : isNext ? 'border-2 border-[var(--accent-2)] bg-white/5 shadow-[0_0_22px_rgba(79,163,255,.35)]' : 'border border-white/25 bg-black/10'}`}
-              style={{ gridRow: Math.floor(i / cols) + 1, gridColumn: (i % cols) + 1 }}
+              className={`absolute rounded-lg overflow-hidden transition-all duration-300 pointer-events-none z-[6] ${tone}`}
+              style={cellStyle(cell)}
             >
               {shot ? (
                 <FrameOverlay frame={settings.frame} caption={frameCaption}>
@@ -320,6 +330,7 @@ export function CameraView({
           </span>
           <span className="mono text-[10px] text-white/60 px-2 py-1 rounded-full bg-black/40 backdrop-blur">
             {settings.rows}×{settings.cols} · {settings.effectId.replace(/-/g, ' ').toUpperCase()}
+            {gridMode && ` · ${settings.template.toUpperCase()}`}
             {settings.frame !== 'none' && ` · ${settings.frame.toUpperCase()}`}
           </span>
           {accessories.length > 0 && (
